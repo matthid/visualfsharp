@@ -265,6 +265,8 @@ namespace Microsoft.FSharp.Control
         P of (AsyncParams<'T> -> FakeUnitValue)
 
     module AsyncBuilderImpl =
+        let myChanges = false
+
         // To consider: augment with more exception traceability information
         // To consider: add the ability to suspend running ps in debug mode
         // To consider: add the ability to trace running ps in debug mode
@@ -533,6 +535,8 @@ namespace Microsoft.FSharp.Control
         // ie creates a new instance, where the new information is added,
         // if cexn is a TaskCanceledException the type is preserved as well.
         let augmentOperationCancelledException (cexn:OperationCanceledException) (edi:ExceptionDispatchInfo) =
+          if not myChanges then cexn
+          else
             // It's probably ok to not care about the stack of the cexn object, because
             // 1. we often don't even collect the stack in the ccont route
             // 2. there are no suited APIs to handle this (at best we could add the original instance to the new instance...)
@@ -917,7 +921,7 @@ namespace Microsoft.FSharp.Control
                     (fun res -> resultCell.RegisterResult(Ok(res),reuseThread=true))
                     (fun edi ->
                         let result =
-                            if token.IsCancellationRequested then Canceled(augmentOperationCancelledException (new OperationCanceledException()) edi)
+                            if myChanges && token.IsCancellationRequested then Canceled(augmentOperationCancelledException (new OperationCanceledException()) edi)
                             else Error(edi)
                         resultCell.RegisterResult(result,reuseThread=true))
                     (fun exn -> resultCell.RegisterResult(Canceled(exn),reuseThread=true))
@@ -952,7 +956,7 @@ namespace Microsoft.FSharp.Control
                         (fun res -> resultCell.RegisterResult(Ok(res),reuseThread=true))
                         (fun edi ->
                             let result =
-                                if token.IsCancellationRequested then Canceled(augmentOperationCancelledException (new OperationCanceledException()) edi)
+                                if myChanges && token.IsCancellationRequested then Canceled(augmentOperationCancelledException (new OperationCanceledException()) edi)
                                 else Error(edi)
                             resultCell.RegisterResult(result,reuseThread=true))
                         (fun exn -> resultCell.RegisterResult(Canceled(exn),reuseThread=true))
@@ -1015,7 +1019,7 @@ namespace Microsoft.FSharp.Control
                 (fun r -> tcs.SetResult r |> fake)
                 (fun edi ->
                     let wrapper =
-                        if token.IsCancellationRequested then
+                        if myChanges && token.IsCancellationRequested then
                             augmentOperationCancelledException (new TaskCanceledException()) edi :> exn
                         else
                             edi.SourceException
@@ -1220,6 +1224,9 @@ namespace Microsoft.FSharp.Control
     module TaskHelpers = 
         // This uses a trick to get the underlying OperationCanceledException
         let inline getCancelledException (completedTask:Task) (waitWithAwaiter) =
+          if not AsyncBuilderImpl.myChanges then
+            new TaskCanceledException(completedTask) :> OperationCanceledException
+          else
             let fallback() = new TaskCanceledException(completedTask) :> OperationCanceledException
             // sadly there is no other public api to retrieve it, but to call .GetAwaiter().GetResult().
             try waitWithAwaiter()
